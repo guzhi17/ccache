@@ -3,56 +3,44 @@ package ccache
 
 import (
 	"container/list"
-	"hash/fnv"
 	"sync/atomic"
 	"time"
 )
 
 // The cache has a generic 'control' channel that is used to send
 // messages to the worker. These are the messages that can be sent to it
-type getDropped struct {
-	res chan int
-}
-type setMaxSize struct {
-	size int64
-}
-
-type clear struct {
-	done chan struct{}
-}
-
-type Cache struct {
-	*Configuration
+type CacheInt64 struct {
+	*ConfigurationInt64
 	list        *list.List
 	size        int64
-	buckets     []*bucket
-	bucketMask  uint32
-	deletables  chan *Item
-	promotables chan *Item
+	buckets     []*bucketInt64
+	bucketMask  int64
+	deletables  chan *ItemInt64
+	promotables chan *ItemInt64
 	control     chan interface{}
 }
 
 // Create a new cache with the specified configuration
 // See ccache.Configure() for creating a configuration
-func New(config *Configuration) *Cache {
-	bks := int(NormalTo2N(int64(config.buckets)))
-	c := &Cache{
+func NewCacheInt64(config *ConfigurationInt64) *CacheInt64 {
+	bks := NormalTo2N(int64(config.buckets))
+	c := &CacheInt64{
 		list:          list.New(),
-		Configuration: config,
-		bucketMask:    uint32(bks) - 1,
-		buckets:       make([]*bucket, bks),
+		ConfigurationInt64: config,
+		bucketMask:    int64(bks) - 1,
+		buckets:       make([]*bucketInt64, bks),
 		control:       make(chan interface{}),
 	}
-	for i := 0; i < bks; i++ {
-		c.buckets[i] = &bucket{
-			lookup: make(map[string]*Item),
+	for i := 0; i < int(bks); i++ {
+		c.buckets[i] = &bucketInt64{
+			lookup: make(map[int64]*ItemInt64),
 		}
 	}
 	c.restart()
 	return c
 }
 
-func (c *Cache) ItemCount() int {
+func (c *CacheInt64) ItemCount() int {
 	count := 0
 	for _, b := range c.buckets {
 		count += b.itemCount()
@@ -60,7 +48,7 @@ func (c *Cache) ItemCount() int {
 	return count
 }
 
-func (c *Cache) DeletePrefix(prefix string) int {
+func (c *CacheInt64) DeletePrefix(prefix int64) int {
 	count := 0
 	for _, b := range c.buckets {
 		count += b.deletePrefix(prefix, c.deletables)
@@ -69,7 +57,7 @@ func (c *Cache) DeletePrefix(prefix string) int {
 }
 
 // Deletes all items that the matches func evaluates to true.
-func (c *Cache) DeleteFunc(matches func(key string, item *Item) bool) int {
+func (c *CacheInt64) DeleteFunc(matches func(key int64, item *ItemInt64) bool) int {
 	count := 0
 	for _, b := range c.buckets {
 		count += b.deleteFunc(matches, c.deletables)
@@ -81,7 +69,7 @@ func (c *Cache) DeleteFunc(matches func(key string, item *Item) bool) int {
 // This can return an expired item. Use item.Expired() to see if the item
 // is expired and item.TTL() to see how long until the item expires (which
 // will be negative for an already expired item).
-func (c *Cache) Get(key string) *Item {
+func (c *CacheInt64) Get(key int64) *ItemInt64 {
 	item := c.bucket(key).get(key)
 	if item == nil {
 		return nil
@@ -93,7 +81,7 @@ func (c *Cache) Get(key string) *Item {
 }
 
 //return item and expired
-func (c *Cache) GetWithNowNoPromote(key string, now time.Time) (*Item, bool) {
+func (c *CacheInt64) GetWithNowNoPromote(key int64, now time.Time) (*ItemInt64, bool) {
 	item := c.bucket(key).get(key)
 	if item == nil {
 		return nil, true
@@ -105,7 +93,7 @@ func (c *Cache) GetWithNowNoPromote(key string, now time.Time) (*Item, bool) {
 	return item, true
 }
 
-func (c *Cache) GetItem(key string) (*Item) {
+func (c *CacheInt64) GetItem(key int64) (*ItemInt64) {
 	return c.bucket(key).get(key)
 	//if item == nil {
 	//	return nil, true
@@ -119,7 +107,7 @@ func (c *Cache) GetItem(key string) (*Item) {
 
 // Used when the cache was created with the Track() configuration option.
 // Avoid otherwise
-func (c *Cache) TrackingGet(key string) TrackedItem {
+func (c *CacheInt64) TrackingGet(key int64) TrackedItem {
 	item := c.Get(key)
 	if item == nil {
 		return NilTracked
@@ -130,19 +118,19 @@ func (c *Cache) TrackingGet(key string) TrackedItem {
 
 // Used when the cache was created with the Track() configuration option.
 // Sets the item, and returns a tracked reference to it.
-func (c *Cache) TrackingSet(key string, value interface{}, duration time.Duration) TrackedItem {
+func (c *CacheInt64) TrackingSet(key int64, value interface{}, duration time.Duration) TrackedItem {
 	return c.set(key, value, duration, true)
 }
 
 // Set the value in the cache for the specified duration
-func (c *Cache) Set(key string, value interface{}, duration time.Duration) {
+func (c *CacheInt64) Set(key int64, value interface{}, duration time.Duration) {
 	c.set(key, value, duration, false)
 }
 
 // Replace the value if it exists, does not set if it doesn't.
 // Returns true if the item existed an was replaced, false otherwise.
 // Replace does not reset item's TTL
-func (c *Cache) Replace(key string, value interface{}) bool {
+func (c *CacheInt64) Replace(key int64, value interface{}) bool {
 	item := c.bucket(key).get(key)
 	if item == nil {
 		return false
@@ -154,7 +142,7 @@ func (c *Cache) Replace(key string, value interface{}) bool {
 // Attempts to get the value from the cache and calles fetch on a miss (missing
 // or stale item). If fetch returns an error, no value is cached and the error
 // is returned back to the caller.
-func (c *Cache) Fetch(key string, duration time.Duration, fetch func() (interface{}, error)) (*Item, error) {
+func (c *CacheInt64) Fetch(key int64, duration time.Duration, fetch func() (interface{}, error)) (*ItemInt64, error) {
 	item := c.Get(key)
 	if item != nil && !item.Expired() {
 		return item, nil
@@ -167,7 +155,7 @@ func (c *Cache) Fetch(key string, duration time.Duration, fetch func() (interfac
 }
 
 // Remove the item from the cache, return true if the item was present, false otherwise.
-func (c *Cache) Delete(key string) bool {
+func (c *CacheInt64) Delete(key int64) bool {
 	item := c.bucket(key).delete(key)
 	if item != nil {
 		c.deletables <- item
@@ -177,7 +165,7 @@ func (c *Cache) Delete(key string) bool {
 }
 
 // Clears the cache
-func (c *Cache) Clear() {
+func (c *CacheInt64) Clear() {
 	done := make(chan struct{})
 	c.control <- clear{done: done}
 	<-done
@@ -185,14 +173,14 @@ func (c *Cache) Clear() {
 
 // Stops the background worker. Operations performed on the cache after Stop
 // is called are likely to panic
-func (c *Cache) Stop() {
+func (c *CacheInt64) Stop() {
 	close(c.promotables)
 	<-c.control
 }
 
 // Gets the number of items removed from the cache due to memory pressure since
 // the last time GetDropped was called
-func (c *Cache) GetDropped() int {
+func (c *CacheInt64) GetDropped() int {
 	res := make(chan int)
 	c.control <- getDropped{res: res}
 	return <-res
@@ -200,23 +188,23 @@ func (c *Cache) GetDropped() int {
 
 // Sets a new max size. That can result in a GC being run if the new maxium size
 // is smaller than the cached size
-func (c *Cache) SetMaxSize(size int64) {
+func (c *CacheInt64) SetMaxSize(size int64) {
 	c.control <- setMaxSize{size}
 }
 
-func (c *Cache) restart() {
-	c.deletables = make(chan *Item, c.deleteBuffer)
-	c.promotables = make(chan *Item, c.promoteBuffer)
+func (c *CacheInt64) restart() {
+	c.deletables = make(chan *ItemInt64, c.deleteBuffer)
+	c.promotables = make(chan *ItemInt64, c.promoteBuffer)
 	c.control = make(chan interface{})
 	go c.worker()
 }
 
-func (c *Cache) deleteItem(bucket *bucket, item *Item) {
+func (c *CacheInt64) deleteItem(bucket *bucketInt64, item *ItemInt64) {
 	bucket.delete(item.key) //stop other GETs from getting it
 	c.deletables <- item
 }
 
-func (c *Cache) set(key string, value interface{}, duration time.Duration, track bool) *Item {
+func (c *CacheInt64) set(key int64, value interface{}, duration time.Duration, track bool) *ItemInt64 {
 	item, existing := c.bucket(key).set(key, value, duration, track)
 	if existing != nil {
 		c.deletables <- existing
@@ -225,12 +213,12 @@ func (c *Cache) set(key string, value interface{}, duration time.Duration, track
 	return item
 }
 
-func (c *Cache) GetIncrVal(key string) ( r int64) {
+func (c *CacheInt64) GetIncrVal(key int64) ( r int64) {
 	r,  _ = c.bucket(key).getIncrVal(key)
 	return
 }
 //just incr no renew timeout
-func (c *Cache) Incr(key string, n int64, duration time.Duration) int64 {
+func (c *CacheInt64) Incr(key int64, n int64, duration time.Duration) int64 {
 	r, item, _ := c.bucket(key).incr(key, n, duration, false)
 	if item != nil{
 		c.promote(item)
@@ -238,7 +226,7 @@ func (c *Cache) Incr(key string, n int64, duration time.Duration) int64 {
 	return r
 }
 //incr and then renew ttl
-func (c *Cache) IncrPromote(key string, n int64, duration time.Duration) int64 {
+func (c *CacheInt64) IncrPromote(key int64, n int64, duration time.Duration) int64 {
 	r, item, exi := c.bucket(key).incr(key, n, duration, false)
 	if item != nil{
 		c.promote(item)
@@ -248,13 +236,11 @@ func (c *Cache) IncrPromote(key string, n int64, duration time.Duration) int64 {
 	return r
 }
 
-func (c *Cache) bucket(key string) *bucket {
-	h := fnv.New32a()
-	h.Write([]byte(key))
-	return c.buckets[h.Sum32()&c.bucketMask]
+func (c *CacheInt64) bucket(key int64) *bucketInt64 {
+	return c.buckets[key&c.bucketMask]
 }
 
-func (c *Cache) promote(item *Item) {
+func (c *CacheInt64) promote(item *ItemInt64) {
 	select {
 	case c.promotables <- item:
 	default:
@@ -262,7 +248,7 @@ func (c *Cache) promote(item *Item) {
 		
 }
 
-func (c *Cache) worker() {
+func (c *CacheInt64) worker() {
 	defer close(c.control)
 	dropped := 0
 	for {
@@ -309,7 +295,7 @@ drain:
 	}
 }
 
-func (c *Cache) doDelete(item *Item) {
+func (c *CacheInt64) doDelete(item *ItemInt64) {
 	if item.element == nil {
 		item.promotions = -2
 	} else {
@@ -321,7 +307,7 @@ func (c *Cache) doDelete(item *Item) {
 	}
 }
 
-func (c *Cache) doPromote(item *Item) bool {
+func (c *CacheInt64) doPromote(item *ItemInt64) bool {
 	//already deleted
 	if item.promotions == -2 {
 		return false
@@ -339,7 +325,7 @@ func (c *Cache) doPromote(item *Item) bool {
 	return true
 }
 
-func (c *Cache) gc() int {
+func (c *CacheInt64) gc() int {
 	dropped := 0
 	element := c.list.Back()
 	for i := 0; i < c.itemsToPrune; i++ {
@@ -347,7 +333,7 @@ func (c *Cache) gc() int {
 			return dropped
 		}
 		prev := element.Prev()
-		item := element.Value.(*Item)
+		item := element.Value.(*ItemInt64)
 		if c.tracking == false || atomic.LoadInt32(&item.refCount) == 0 {
 			c.bucket(item.key).delete(item.key)
 			c.size -= item.size
