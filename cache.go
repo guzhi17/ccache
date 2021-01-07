@@ -93,6 +93,18 @@ func (c *Cache) Get(key string) *Item {
 }
 
 //return item and expired
+func (c *Cache) GetWithNow(key string, now time.Time) *Item {
+	item := c.bucket(key).get(key)
+	if item == nil {
+		return nil
+	}
+	if !item.IsExpired(now) {
+		c.promote(item)
+	}
+	return item
+}
+
+//return item and expired
 func (c *Cache) GetWithNowNoPromote(key string, now time.Time) (*Item, bool) {
 	item := c.bucket(key).get(key)
 	if item == nil {
@@ -252,6 +264,13 @@ func (c *Cache) bucket(key string) *bucket {
 	h := fnv.New32a()
 	h.Write([]byte(key))
 	return c.buckets[h.Sum32()&c.bucketMask]
+}
+
+func (c *Cache) Promote(item *Item) {
+	select {
+	case c.promotables <- item:
+	default:
+	}
 }
 
 func (c *Cache) promote(item *Item) {

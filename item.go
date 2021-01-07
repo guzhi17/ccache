@@ -88,8 +88,10 @@ func (i *Item) Release() {
 }
 
 func (i *Item) Expired() bool {
-	expires := atomic.LoadInt64(&i.expires)
-	return expires < time.Now().UnixNano()
+	return atomic.LoadInt64(&i.expires) < time.Now().UnixNano()
+}
+func (i *Item) IsExpired(now time.Time) bool {
+	return atomic.LoadInt64(&i.expires) < now.UnixNano()
 }
 
 func (i *Item) TTL() time.Duration {

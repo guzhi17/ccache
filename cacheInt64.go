@@ -80,6 +80,17 @@ func (c *CacheInt64) Get(key int64) *ItemInt64 {
 	return item
 }
 
+func (c *CacheInt64) GetWithNow(key int64, now time.Time) *ItemInt64 {
+	item := c.bucket(key).get(key)
+	if item == nil {
+		return nil
+	}
+	if !item.IsExpired(now) {
+		c.promote(item)
+	}
+	return item
+}
+
 //return item and expired
 func (c *CacheInt64) GetWithNowNoPromote(key int64, now time.Time) (*ItemInt64, bool) {
 	item := c.bucket(key).get(key)
@@ -240,6 +251,13 @@ func (c *CacheInt64) bucket(key int64) *bucketInt64 {
 	return c.buckets[key&c.bucketMask]
 }
 
+func (c *CacheInt64) Promote(item *ItemInt64) {
+	select {
+	case c.promotables <- item:
+	default:
+	}
+
+}
 func (c *CacheInt64) promote(item *ItemInt64) {
 	select {
 	case c.promotables <- item:
