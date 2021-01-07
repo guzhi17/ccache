@@ -116,6 +116,18 @@ func (c *CacheInt64) GetItem(key int64) (*ItemInt64) {
 	//return item, true
 }
 
+func (c *CacheInt64) GetItemWithNow(key int64, now time.Time) (*ItemInt64, bool) {
+	item := c.bucket(key).get(key)
+	if item == nil {
+		return nil, true
+	}
+	if !item.IsExpired(now) {
+		c.promote(item)
+		return item, false
+	}
+	return item, true
+}
+
 // Used when the cache was created with the Track() configuration option.
 // Avoid otherwise
 func (c *CacheInt64) TrackingGet(key int64) TrackedItem {
@@ -164,6 +176,19 @@ func (c *CacheInt64) Fetch(key int64, duration time.Duration, fetch func() (inte
 	}
 	return c.set(key, value, duration, false), nil
 }
+
+func (c *CacheInt64) FetchNow(key int64, now time.Time, duration time.Duration, fetch func() (interface{}, error)) (*ItemInt64, error) {
+	item := c.Get(key)
+	if item != nil && !item.IsExpired(now) {
+		return item, nil
+	}
+	value, err := fetch()
+	if err != nil {
+		return nil, err
+	}
+	return c.set(key, value, duration, false), nil
+}
+
 
 // Remove the item from the cache, return true if the item was present, false otherwise.
 func (c *CacheInt64) Delete(key int64) bool {
@@ -236,9 +261,25 @@ func (c *CacheInt64) Incr(key int64, n int64, duration time.Duration) int64 {
 	}
 	return r
 }
+func (c *CacheInt64) IncrNow(key int64, n int64, now time.Time, duration time.Duration) int64 {
+	r, item, _ := c.bucket(key).incrNow(key, n, now, duration, false)
+	if item != nil{
+		c.promote(item)
+	}
+	return r
+}
 //incr and then renew ttl
 func (c *CacheInt64) IncrPromote(key int64, n int64, duration time.Duration) int64 {
 	r, item, exi := c.bucket(key).incr(key, n, duration, false)
+	if item != nil{
+		c.promote(item)
+	}else if exi != nil{
+		c.promote(exi)
+	}
+	return r
+}
+func (c *CacheInt64) IncrNowPromote(key int64, n int64, now time.Time, duration time.Duration) int64 {
+	r, item, exi := c.bucket(key).incrNowPromote(key, n, now, duration, false)
 	if item != nil{
 		c.promote(item)
 	}else if exi != nil{

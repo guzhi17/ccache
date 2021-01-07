@@ -2,6 +2,7 @@ package ccache
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,7 +46,9 @@ func (b *bucketInt64) getIncrVal(key int64) (r int64, exis *ItemInt64) {
 	return 0, nil
 }
 func (b *bucketInt64) incr(key int64, value int64, duration time.Duration, track bool) (r int64, pro *ItemInt64, exis *ItemInt64) {
-	now := time.Now()
+	return b.incrNow(key, value, time.Now(), duration, track)
+}
+func (b *bucketInt64) incrNow(key int64, value int64, now time.Time, duration time.Duration, track bool) (r int64, pro *ItemInt64, exis *ItemInt64) {
 	tm := now.UnixNano()
 	expires := now.Add(duration).UnixNano()
 	item := newItemInt64(key, &value, expires, track)
@@ -55,6 +58,24 @@ func (b *bucketInt64) incr(key int64, value int64, duration time.Duration, track
 	if existing != nil && existing.expires > tm {
 		if v, ok := existing.value.(*int64);ok{
 			*v += value
+			return *v, nil, existing
+		}
+	}
+	b.lookup[key] = item
+	return value, item, nil
+}
+
+func (b *bucketInt64) incrNowPromote(key int64, value int64, now time.Time, duration time.Duration, track bool) (r int64, pro *ItemInt64, exis *ItemInt64) {
+	tm := now.UnixNano()
+	expires := now.Add(duration).UnixNano()
+	item := newItemInt64(key, &value, expires, track)
+	b.Lock()
+	defer b.Unlock()
+	existing := b.lookup[key]
+	if existing != nil && existing.expires > tm {
+		if v, ok := existing.value.(*int64);ok{
+			*v += value
+			atomic.StoreInt64(&existing.expires, expires)
 			return *v, nil, existing
 		}
 	}

@@ -129,6 +129,20 @@ func (c *Cache) GetItem(key string) (*Item) {
 	//return item, true
 }
 
+//return item and expired
+func (c *Cache) GetItemWithNow(key string, now time.Time) (*Item, bool) {
+	item := c.bucket(key).get(key)
+	if item == nil {
+		return nil, true
+	}
+	if !item.IsExpired(now) {
+		c.promote(item)
+		return item, false
+	}
+	return item, true
+}
+
+
 // Used when the cache was created with the Track() configuration option.
 // Avoid otherwise
 func (c *Cache) TrackingGet(key string) TrackedItem {
@@ -177,6 +191,20 @@ func (c *Cache) Fetch(key string, duration time.Duration, fetch func() (interfac
 	}
 	return c.set(key, value, duration, false), nil
 }
+
+
+func (c *Cache) FetchNow(key string, now time.Time, duration time.Duration, fetch func() (interface{}, error)) (*Item, error) {
+	item := c.Get(key)
+	if item != nil && !item.IsExpired(now) {
+		return item, nil
+	}
+	value, err := fetch()
+	if err != nil {
+		return nil, err
+	}
+	return c.set(key, value, duration, false), nil
+}
+
 
 // Remove the item from the cache, return true if the item was present, false otherwise.
 func (c *Cache) Delete(key string) bool {
@@ -241,6 +269,8 @@ func (c *Cache) GetIncrVal(key string) ( r int64) {
 	r,  _ = c.bucket(key).getIncrVal(key)
 	return
 }
+
+
 //just incr no renew timeout
 func (c *Cache) Incr(key string, n int64, duration time.Duration) int64 {
 	r, item, _ := c.bucket(key).incr(key, n, duration, false)
@@ -249,9 +279,25 @@ func (c *Cache) Incr(key string, n int64, duration time.Duration) int64 {
 	}
 	return r
 }
+func (c *Cache) IncrNow(key string, n int64, now time.Time, duration time.Duration) int64 {
+	r, item, _ := c.bucket(key).incrNow(key, n, now, duration, false)
+	if item != nil{
+		c.promote(item)
+	}
+	return r
+}
 //incr and then renew ttl
 func (c *Cache) IncrPromote(key string, n int64, duration time.Duration) int64 {
 	r, item, exi := c.bucket(key).incr(key, n, duration, false)
+	if item != nil{
+		c.promote(item)
+	}else if exi != nil{
+		c.promote(exi)
+	}
+	return r
+}
+func (c *Cache) IncrNowPromote(key string, n int64, now time.Time, duration time.Duration) int64 {
+	r, item, exi := c.bucket(key).incrNowPromote(key, n, now, duration, false)
 	if item != nil{
 		c.promote(item)
 	}else if exi != nil{
