@@ -97,7 +97,7 @@ func (c *CacheInt64) GetWithNowNoPromote(key int64, now time.Time) (*ItemInt64, 
 	if item == nil {
 		return nil, true
 	}
-	if item.expires > now.UnixNano() {
+	if !item.IsExpired(now) {
 		//c.promote(item)
 		return item, false
 	}
@@ -150,6 +150,10 @@ func (c *CacheInt64) Set(key int64, value interface{}, duration time.Duration) {
 	c.set(key, value, duration, false)
 }
 
+func (c *CacheInt64) SetWithDeadline(key int64, value interface{}, deadline time.Time) {
+	c.setWithDeadline(key, value, deadline, false)
+}
+
 // Replace the value if it exists, does not set if it doesn't.
 // Returns true if the item existed an was replaced, false otherwise.
 // Replace does not reset item's TTL
@@ -178,8 +182,8 @@ func (c *CacheInt64) Fetch(key int64, duration time.Duration, fetch func() (inte
 }
 
 func (c *CacheInt64) FetchNow(key int64, now time.Time, duration time.Duration, fetch func() (interface{}, error)) (*ItemInt64, error) {
-	item := c.Get(key)
-	if item != nil && !item.IsExpired(now) {
+	item, expire := c.GetItemWithNow(key, now)
+	if item != nil && !expire {
 		return item, nil
 	}
 	value, err := fetch()
@@ -242,6 +246,15 @@ func (c *CacheInt64) deleteItem(bucket *bucketInt64, item *ItemInt64) {
 
 func (c *CacheInt64) set(key int64, value interface{}, duration time.Duration, track bool) *ItemInt64 {
 	item, existing := c.bucket(key).set(key, value, duration, track)
+	if existing != nil {
+		c.deletables <- existing
+	}
+	c.promote(item)
+	return item
+}
+
+func (c *CacheInt64) setWithDeadline(key int64, value interface{}, deadline time.Time, track bool) *ItemInt64 {
+	item, existing := c.bucket(key).setWithDeadline(key, value, deadline, track)
 	if existing != nil {
 		c.deletables <- existing
 	}

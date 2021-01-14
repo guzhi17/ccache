@@ -33,6 +33,16 @@ func (b *bucketInt64) set(key int64, value interface{}, duration time.Duration, 
 	return item, existing
 }
 
+func (b *bucketInt64) setWithDeadline(key int64, value interface{}, deadline time.Time, track bool) (*ItemInt64, *ItemInt64) {
+	expires := deadline.UnixNano()
+	item := newItemInt64(key, value, expires, track)
+	b.Lock()
+	existing := b.lookup[key]
+	b.lookup[key] = item
+	b.Unlock()
+	return item, existing
+}
+
 
 func (b *bucketInt64) getIncrVal(key int64) (r int64, exis *ItemInt64) {
 	now := time.Now()

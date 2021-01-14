@@ -25,7 +25,11 @@ func (b *bucket) get(key string) *Item {
 }
 
 func (b *bucket) set(key string, value interface{}, duration time.Duration, track bool) (*Item, *Item) {
-	expires := time.Now().Add(duration).UnixNano()
+	return b.setWithDeadline(key, value, time.Now().Add(duration), track)
+}
+
+func (b *bucket) setWithDeadline(key string, value interface{}, deadline time.Time, track bool) (*Item, *Item) {
+	expires := deadline.UnixNano()
 	item := newItem(key, value, expires, track)
 	b.Lock()
 	existing := b.lookup[key]
