@@ -41,7 +41,9 @@ func (i *ItemInt64) shouldPromote(getsPerPromote int32) bool {
 	i.promotions += 1
 	return i.promotions == getsPerPromote
 }
-
+func (i *ItemInt64) Key() int64 {
+	return i.key
+}
 func (i *ItemInt64) Value() interface{} {
 	return i.value
 }
